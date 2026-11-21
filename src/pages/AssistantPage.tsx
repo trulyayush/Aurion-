@@ -16,6 +16,7 @@ import {
   AppPage,
   ChatMessage,
   FinancialAnalysisSummary,
+  FinancialGoal,
   LionState,
   UserProfile,
 } from '../types/finance';
@@ -24,6 +25,7 @@ import { formatCurrency } from '../utils/currency';
 interface AssistantPageProps {
   profile: UserProfile;
   analysis: FinancialAnalysisSummary;
+  goals?: FinancialGoal[];
   messages: ChatMessage[];
   onSendMessage: (text: string) => Promise<ChatMessage | null>;
   onClearChat: () => Promise<void>;
@@ -41,6 +43,7 @@ const DEFAULT_SUGGESTIONS = [
 export const AssistantPage: React.FC<AssistantPageProps> = ({
   profile,
   analysis,
+  goals = [],
   messages,
   onSendMessage,
   onClearChat,
@@ -49,7 +52,25 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
 }) => {
   const [input, setInput] = useState('');
   const [isThinking, setIsThinking] = useState(false);
+  const [isWelcoming, setIsWelcoming] = useState(true);
+  const [isCelebrating, setIsCelebrating] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  const hasAchievedGoal = goals.some(
+    (g) => g.targetAmount > 0 && g.currentSavings >= g.targetAmount
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsWelcoming(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!hasAchievedGoal) return;
+    setIsCelebrating(true);
+    const timer = window.setTimeout(() => setIsCelebrating(false), 3200);
+    return () => window.clearTimeout(timer);
+  }, [hasAchievedGoal]);
 
   const voice = useVoiceAssistant({
     voiceEnabled: profile.voiceEnabled,
@@ -66,6 +87,10 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
     ? 'thinking'
     : voice.isSpeaking
     ? 'speaking'
+    : isCelebrating
+    ? 'happy'
+    : isWelcoming
+    ? 'welcoming'
     : 'idle';
 
   useEffect(() => {
@@ -141,12 +166,17 @@ export const AssistantPage: React.FC<AssistantPageProps> = ({
           <LionAvatar3D
             state={lionState}
             speechPulse={voice.speechPulse}
+            micLevel={voice.micLevel}
             onInteract={() => {
               const summary = `You have ${analysis.analysisPeriod.transactionCount} recorded transactions, a net cash flow of ${formatCurrency(
                 analysis.overview.netCashFlow,
                 profile.currency
               )}, and a financial health score of ${analysis.healthScore.total} out of 100.`;
               voice.speak(summary);
+              if (hasAchievedGoal) {
+                setIsCelebrating(true);
+                window.setTimeout(() => setIsCelebrating(false), 2600);
+              }
             }}
           />
         </div>

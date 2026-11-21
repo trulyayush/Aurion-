@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -32,6 +32,12 @@ import {
   formatChangePercent,
   MonthlyChartPoint,
 } from '../utils/dashboardMetrics';
+
+const Financial3DShowcase = lazy(() =>
+  import('../components/3d/Financial3DShowcase').then((m) => ({
+    default: m.Financial3DShowcase,
+  }))
+);
 
 interface DashboardPageProps {
   profile: UserProfile;
@@ -433,6 +439,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </button>
         </div>
       </div>
+
+      {/* 3D Financial Visual Showcase (Lazy-loaded) */}
+      <Suspense
+        fallback={
+          <div className="bg-white rounded-2xl border border-[#E5E1D8] p-6 text-xs text-[#5C635E]">
+            Loading 3D wealth &amp; spending topology...
+          </div>
+        }
+      >
+        <Financial3DShowcase
+          analysis={analysis}
+          currency={cur}
+          onInspectReports={() => onNavigate('reports')}
+        />
+      </Suspense>
 
       {/* Bottom Row: Recent Transactions & Active Goals */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -149,12 +149,24 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
     },
   });
 
+  const [isWelcoming, setIsWelcoming] = useState(true);
+  const [isCelebrating, setIsCelebrating] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsWelcoming(false), 2200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const lionState: LionState = voice.isListening
     ? 'listening'
     : voice.isSpeaking
     ? 'speaking'
     : saving
     ? 'thinking'
+    : isCelebrating
+    ? 'happy'
+    : isWelcoming
+    ? 'welcoming'
     : 'idle';
 
   const goToStep = (nextIdx: number, nextAnswers: OnboardingAnswers) => {
@@ -189,7 +201,8 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
     setSaving(false);
 
     if (isLast) {
-      onFinishToAssistant();
+      setIsCelebrating(true);
+      window.setTimeout(() => onFinishToAssistant(), 900);
     } else {
       goToStep(stepIndex + 1, updated);
     }
@@ -259,6 +272,7 @@ export const OnboardingPage: React.FC<OnboardingPageProps> = ({
             <LionAvatar3D
               state={lionState}
               speechPulse={voice.speechPulse}
+              micLevel={voice.micLevel}
               onInteract={() => voice.speak(currentQuestion.question)}
               compact
             />

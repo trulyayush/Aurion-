@@ -45,10 +45,17 @@ export function useVoiceAssistant(options: {
   const [interimTranscript, setInterimTranscript] = useState('');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speechPulse, setSpeechPulse] = useState(0);
+  const [micLevel, setMicLevel] = useState(0);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const pulseIntervalRef = useRef<number | null>(null);
   const onFinalRef = useRef(options.onFinalTranscript);
+
+  // Web Audio API live mic analyzer refs
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRafRef = useRef<number | null>(null);
+  const fallbackMicTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     onFinalRef.current = options.onFinalTranscript;
@@ -57,6 +64,82 @@ export function useVoiceAssistant(options: {
   useEffect(() => {
     setIsMuted(!options.voiceEnabled);
   }, [options.voiceEnabled]);
+
+  const stopMicAnalyzer = useCallback(() => {
+    if (analyserRafRef.current !== null) {
+      cancelAnimationFrame(analyserRafRef.current);
+      analyserRafRef.current = null;
+    }
+    if (fallbackMicTimerRef.current !== null) {
+      window.clearInterval(fallbackMicTimerRef.current);
+      fallbackMicTimerRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((t) => t.stop());
+      audioStreamRef.current = null;
+    }
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+      audioCtxRef.current = null;
+    }
+    setMicLevel(0);
+  }, []);
+
+  const startMicAnalyzer = useCallback(async () => {
+    stopMicAnalyzer();
+
+    const startSimulatedFallback = () => {
+      let phase = 0;
+      fallbackMicTimerRef.current = window.setInterval(() => {
+        phase += 0.45;
+        setMicLevel(0.28 + Math.sin(phase) * 0.16 + Math.random() * 0.15);
+      }, 90);
+    };
+
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices?.getUserMedia ||
+      typeof AudioContext === 'undefined'
+    ) {
+      startSimulatedFallback();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      let lastUpdate = 0;
+
+      const sample = (now: number) => {
+        if (!audioStreamRef.current) return;
+        if (now - lastUpdate >= 65) {
+          lastUpdate = now;
+          analyser.getByteTimeDomainData(data);
+          let sumSq = 0;
+          for (let i = 0; i < data.length; i++) {
+            const norm = (data[i] - 128) / 128;
+            sumSq += norm * norm;
+          }
+          const rms = Math.sqrt(sumSq / data.length);
+          setMicLevel(Math.min(1, Math.max(0.08, rms * 3.8)));
+        }
+        analyserRafRef.current = requestAnimationFrame(sample);
+      };
+
+      analyserRafRef.current = requestAnimationFrame(sample);
+    } catch {
+      startSimulatedFallback();
+    }
+  }, [stopMicAnalyzer]);
 
   const stopPulse = useCallback(() => {
     if (pulseIntervalRef.current !== null) {
@@ -194,10 +277,12 @@ export function useVoiceAssistant(options: {
           setVoiceError(`Voice input error (${event.error}). Please type your message.`);
         }
         setIsListening(false);
+        stopMicAnalyzer();
       };
 
       recognition.onend = () => {
         setIsListening(false);
+        stopMicAnalyzer();
         const committed = finalText.trim();
         if (committed) {
           setInterimTranscript('');
@@ -208,12 +293,14 @@ export function useVoiceAssistant(options: {
       recognitionRef.current = recognition;
       setInterimTranscript('');
       setIsListening(true);
+      void startMicAnalyzer();
       recognition.start();
     } catch {
       setIsListening(false);
+      stopMicAnalyzer();
       setVoiceError('Unable to start microphone input in this browser.');
     }
-  }, [speechSupported, stopSpeaking]);
+  }, [speechSupported, startMicAnalyzer, stopMicAnalyzer, stopSpeaking]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -224,14 +311,16 @@ export function useVoiceAssistant(options: {
       }
     }
     setIsListening(false);
-  }, []);
+    stopMicAnalyzer();
+  }, [stopMicAnalyzer]);
 
   useEffect(() => {
     return () => {
       stopListening();
       stopSpeaking();
+      stopMicAnalyzer();
     };
-  }, [stopListening, stopSpeaking]);
+  }, [stopListening, stopMicAnalyzer, stopSpeaking]);
 
   return {
     isListening,
@@ -244,6 +333,7 @@ export function useVoiceAssistant(options: {
     voiceError,
     clearVoiceError: () => setVoiceError(null),
     speechPulse,
+    micLevel,
     speechSupported,
     ttsSupported,
     startListening,

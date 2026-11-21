@@ -2,7 +2,7 @@ export type CurrencyCode = 'INR' | 'USD' | 'EUR' | 'GBP';
 
 export type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced';
 
-export type LionState = 'idle' | 'listening' | 'thinking' | 'speaking';
+export type LionState = 'welcoming' | 'idle' | 'listening' | 'thinking' | 'speaking' | 'happy';
 
 export type AppPage =
   | 'welcome'

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -24,6 +24,12 @@ import {
   calculateGoalMetrics,
   runWhatIfSimulation,
 } from '../utils/financeEngine';
+
+const GoalObject3D = lazy(() =>
+  import('../components/3d/GoalObject3D').then((m) => ({
+    default: m.GoalObject3D,
+  }))
+);
 
 export type PlanningTab = 'forecast' | 'subscriptions' | 'debt' | 'goals' | 'whatif';
 
@@ -64,13 +70,19 @@ export const PlanningPage: React.FC<PlanningPageProps> = ({
   const [debtRate, setDebtRate] = useState('');
   const [debtEmi, setDebtEmi] = useState('');
 
-  // Goal Form State
+  // Goal Form & Selected 3D Preview State
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   const [goalTitle, setGoalTitle] = useState('');
   const [goalCat, setGoalCat] = useState<FinancialGoal['category']>('Emergency Fund');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalCurrent, setGoalCurrent] = useState('');
   const [goalMonthly, setGoalMonthly] = useState('');
   const [goalDate, setGoalDate] = useState('2027-12-01');
+
+  const activeGoal3D = useMemo(() => {
+    if (goals.length === 0) return null;
+    return goals.find((g) => g.id === selectedGoalId) ?? goals[0];
+  }, [goals, selectedGoalId]);
 
   // What-If Simulator State
   const [whatIf, setWhatIf] = useState<WhatIfParams>({
@@ -647,6 +659,18 @@ export const PlanningPage: React.FC<PlanningPageProps> = ({
           </div>
 
           <div className="lg:col-span-8 space-y-4">
+            {activeGoal3D && (
+              <Suspense
+                fallback={
+                  <div className="bg-[#EBF0E9] rounded-2xl border border-[#DCE2DA] p-5 text-xs text-[#5C635E]">
+                    Loading 3D goal sculpture...
+                  </div>
+                }
+              >
+                <GoalObject3D goal={activeGoal3D} currency={cur} />
+              </Suspense>
+            )}
+
             {goals.length === 0 ? (
               <div className="bg-white rounded-2xl border border-[#E5E1D8] p-8 text-center text-sm text-[#5C635E]">
                 No financial goals yet. Create your first goal on the left to calculate required
@@ -655,10 +679,13 @@ export const PlanningPage: React.FC<PlanningPageProps> = ({
             ) : (
               goals.map((g) => {
                 const m = calculateGoalMetrics(g);
+                const isSelected3D = activeGoal3D?.id === g.id;
                 return (
                   <div
                     key={g.id}
-                    className="bg-white rounded-2xl border border-[#E5E1D8] p-5 space-y-3"
+                    className={`bg-white rounded-2xl border p-5 space-y-3 transition-colors ${
+                      isSelected3D ? 'border-[#183B32]' : 'border-[#E5E1D8]'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
@@ -669,14 +696,27 @@ export const PlanningPage: React.FC<PlanningPageProps> = ({
                           {g.title}
                         </h4>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onDeleteGoal(g.id)}
-                        aria-label={`Delete goal ${g.title}`}
-                        className="p-1.5 text-[#5C635E] hover:text-[#991B1B]"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedGoalId(g.id)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors ${
+                            isSelected3D
+                              ? 'bg-[#183B32] text-white border-[#183B32]'
+                              : 'bg-[#FAF9F6] text-[#183B32] border-[#DFDBD0] hover:border-[#183B32]'
+                          }`}
+                        >
+                          {isSelected3D ? 'Active in 3D' : 'View in 3D'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onDeleteGoal(g.id)}
+                          aria-label={`Delete goal ${g.title}`}
+                          className="p-1.5 text-[#5C635E] hover:text-[#991B1B]"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="w-full h-2.5 bg-[#EFECE5] rounded-full overflow-hidden">

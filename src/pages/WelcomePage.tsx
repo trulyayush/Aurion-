@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowRight, ShieldCheck, Sparkles, UserCheck } from 'lucide-react';
 import { LionAvatar3D } from '../components/LionAvatar3D';
 import { CurrencyCode, ExperienceLevel, LionState } from '../types/finance';
@@ -30,10 +30,17 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({
   isLoading,
 }) => {
   const [mode, setMode] = useState<'create' | 'signin'>('create');
-  const [lionState, setLionState] = useState<LionState>('idle');
+  const [lionState, setLionState] = useState<LionState>('welcoming');
   const [greetingText, setGreetingText] = useState(
     'Hello, I am AURION. Share a few basics or explore the demo profile and we will map out your finances together.'
   );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setLionState((prev) => (prev === 'welcoming' ? 'idle' : prev));
+    }, 2600);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   // Create profile form fields
   const [username, setUsername] = useState('');
@@ -52,7 +59,8 @@ export const WelcomePage: React.FC<WelcomePageProps> = ({
     setGreetingText(
       'Nice to meet you. I analyze your real statements, explain trends clearly, and never guess numbers.'
     );
-    window.setTimeout(() => setLionState('idle'), 2400);
+    window.setTimeout(() => setLionState('happy'), 1800);
+    window.setTimeout(() => setLionState('idle'), 3000);
   };
 
   const handleCreateSubmit = async (e: React.FormEvent) => {

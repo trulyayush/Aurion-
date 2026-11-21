@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
+import { AurionLoadingScreen } from './components/3d/AurionLoadingScreen';
+import { ThreeSceneProvider } from './components/3d/ThreeSceneContext';
 import { NewTransactionPayload } from './components/QuickAddTransactionModal';
 import { AssistantPage } from './pages/AssistantPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -24,6 +26,13 @@ import {
   UserProfile,
 } from './types/finance';
 import { analyzeFinances } from './utils/financeEngine';
+import {
+  canDismissLoadingScreen,
+  getLoadingTimingConfig,
+  LoadingReadinessSignals,
+  resolveLoadingStage,
+} from './utils/loadingSequence';
+import { prefersReducedMotion } from './utils/threeStudio';
 
 interface UserBundle {
   profile: UserProfile;
@@ -42,6 +51,111 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  const reducedMotion = useMemo(() => prefersReducedMotion(), []);
+  const loadingTiming = useMemo(() => getLoadingTimingConfig(reducedMotion), [reducedMotion]);
+  const [introPhase, setIntroPhase] = useState<'active' | 'exiting' | 'done'>('active');
+  const [loadingSignals, setLoadingSignals] = useState<LoadingReadinessSignals>({
+    fontsReady: false,
+    scene3dReady: false,
+    workspaceReady: false,
+    minDurationElapsed: false,
+  });
+  const introDoneTriggeredRef = useRef(false);
+
+  // Track real browser font readiness, document load, minimum reveal window, and asset safety cap
+  useEffect(() => {
+    let cancelled = false;
+    const isAutostart =
+      typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('autostart') === '1';
+
+    if (typeof document !== 'undefined' && document.fonts?.ready) {
+      document.fonts.ready
+        .then(() => {
+          if (!cancelled) {
+            setLoadingSignals((prev) => ({ ...prev, fontsReady: true }));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setLoadingSignals((prev) => ({ ...prev, fontsReady: true }));
+          }
+        });
+    } else {
+      setLoadingSignals((prev) => ({ ...prev, fontsReady: true }));
+    }
+
+    if (!isAutostart) {
+      const markDocReady = () => {
+        if (!cancelled) {
+          setLoadingSignals((prev) => ({ ...prev, workspaceReady: true }));
+        }
+      };
+      if (typeof document !== 'undefined' && document.readyState === 'complete') {
+        markDocReady();
+      } else if (typeof window !== 'undefined') {
+        window.addEventListener('load', markDocReady, { once: true });
+      } else {
+        markDocReady();
+      }
+    }
+
+    const minTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoadingSignals((prev) => ({ ...prev, minDurationElapsed: true }));
+      }
+    }, loadingTiming.minDisplayMs);
+
+    // Safety fallback so a slow/blocked 3D or font asset never blocks app entry indefinitely
+    const safetyTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoadingSignals((prev) => ({
+          ...prev,
+          fontsReady: true,
+          scene3dReady: true,
+          workspaceReady: true,
+        }));
+      }
+    }, loadingTiming.assetFallbackMs);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(minTimer);
+      window.clearTimeout(safetyTimer);
+    };
+  }, [loadingTiming.assetFallbackMs, loadingTiming.minDisplayMs]);
+
+  const handleLoadingSceneReady = useCallback(() => {
+    setLoadingSignals((prev) => (prev.scene3dReady ? prev : { ...prev, scene3dReady: true }));
+  }, []);
+
+  const handleLoadingExitComplete = useCallback(() => {
+    if (introDoneTriggeredRef.current) return;
+    introDoneTriggeredRef.current = true;
+    setIntroPhase('done');
+  }, []);
+
+  useEffect(() => {
+    if (introPhase !== 'active') return;
+    if (!canDismissLoadingScreen(loadingSignals)) return;
+
+    const settleMs = reducedMotion ? 100 : 320;
+    const settleTimer = window.setTimeout(() => {
+      setIntroPhase('exiting');
+    }, settleMs);
+    return () => window.clearTimeout(settleTimer);
+  }, [introPhase, loadingSignals, reducedMotion]);
+
+  useEffect(() => {
+    if (introPhase !== 'exiting') return;
+    const backupTimer = window.setTimeout(() => {
+      handleLoadingExitComplete();
+    }, loadingTiming.exitDurationMs + 160);
+    return () => window.clearTimeout(backupTimer);
+  }, [handleLoadingExitComplete, introPhase, loadingTiming.exitDurationMs]);
+
+  const loadingStage = useMemo(() => resolveLoadingStage(loadingSignals), [loadingSignals]);
 
   const authedFetch = useCallback(
     async (url: string, init?: RequestInit) => {
@@ -87,6 +201,7 @@ export default function App() {
       setAuthError(err instanceof Error ? err.message : 'Unable to start demo profile');
     } finally {
       setIsLoading(false);
+      setLoadingSignals((prev) => ({ ...prev, workspaceReady: true }));
     }
   }, [applyBundle]);
 
@@ -331,106 +446,116 @@ export default function App() {
     );
   }, [bundle]);
 
-  if (!bundle || !token || page === 'welcome') {
-    return (
-      <WelcomePage
-        onRegister={handleRegister}
-        onLogin={handleLogin}
-        onStartDemo={handleStartDemo}
-        authError={authError}
-        isLoading={isLoading}
-      />
-    );
-  }
-
   return (
-    <AppShell
-      activePage={page}
-      onNavigate={(nextPage) => {
-        if (nextPage === 'planning') setPlanningTab('forecast');
-        setPage(nextPage);
-      }}
-      profile={bundle.profile}
-      onLogout={handleLogout}
-    >
-      {page === 'onboarding' && (
-        <OnboardingPage
-          profile={bundle.profile}
-          onSaveAnswers={handleSaveOnboarding}
-          onFinishToAssistant={() => setPage('assistant')}
+    <ThreeSceneProvider>
+      {introPhase !== 'done' && (
+        <AurionLoadingScreen
+          stage={loadingStage}
+          isExiting={introPhase === 'exiting'}
+          onSceneReady={handleLoadingSceneReady}
+          onExitComplete={handleLoadingExitComplete}
         />
       )}
 
-      {page === 'assistant' && analysis && (
-        <AssistantPage
-          profile={bundle.profile}
-          analysis={analysis}
-          messages={bundle.messages}
-          onSendMessage={handleSendMessage}
-          onClearChat={handleClearChat}
-          onNavigate={setPage}
-          aiError={aiError}
+      {!bundle || !token || page === 'welcome' ? (
+        <WelcomePage
+          onRegister={handleRegister}
+          onLogin={handleLogin}
+          onStartDemo={handleStartDemo}
+          authError={authError}
+          isLoading={isLoading}
         />
-      )}
-
-      {page === 'dashboard' && analysis && (
-        <DashboardPage
-          profile={bundle.profile}
-          analysis={analysis}
-          transactions={bundle.transactions}
-          goals={bundle.goals}
+      ) : (
+        <AppShell
+          activePage={page}
           onNavigate={(nextPage) => {
             if (nextPage === 'planning') setPlanningTab('forecast');
             setPage(nextPage);
           }}
-          onCheckGoals={() => {
-            setPlanningTab('goals');
-            setPage('planning');
-          }}
-          onAddTransaction={handleAddTransaction}
-        />
-      )}
-
-      {page === 'transactions' && (
-        <TransactionsPage
           profile={bundle.profile}
-          transactions={bundle.transactions}
-          documents={bundle.documents}
-          onParsePdf={handleParsePdf}
-          onConfirmImport={handleConfirmImport}
-          onUpdateCategory={handleUpdateCategory}
-          onDeleteTransaction={handleDeleteTransaction}
-        />
-      )}
-
-      {page === 'reports' && analysis && (
-        <ReportsPage profile={bundle.profile} analysis={analysis} />
-      )}
-
-      {page === 'planning' && analysis && (
-        <PlanningPage
-          profile={bundle.profile}
-          analysis={analysis}
-          debts={bundle.debts}
-          goals={bundle.goals}
-          initialTab={planningTab}
-          onAddDebt={handleAddDebt}
-          onDeleteDebt={handleDeleteDebt}
-          onAddGoal={handleAddGoal}
-          onDeleteGoal={handleDeleteGoal}
-        />
-      )}
-
-      {page === 'settings' && (
-        <SettingsPage
-          profile={bundle.profile}
-          onUpdateProfile={handleUpdateProfile}
-          onExportJson={handleExportJson}
-          onResetDemo={handleResetDemo}
-          onDeleteProfile={handleDeleteProfile}
           onLogout={handleLogout}
-        />
+        >
+          {page === 'onboarding' && (
+            <OnboardingPage
+              profile={bundle.profile}
+              onSaveAnswers={handleSaveOnboarding}
+              onFinishToAssistant={() => setPage('assistant')}
+            />
+          )}
+
+          {page === 'assistant' && analysis && (
+            <AssistantPage
+              profile={bundle.profile}
+              analysis={analysis}
+              goals={bundle.goals}
+              messages={bundle.messages}
+              onSendMessage={handleSendMessage}
+              onClearChat={handleClearChat}
+              onNavigate={setPage}
+              aiError={aiError}
+            />
+          )}
+
+          {page === 'dashboard' && analysis && (
+            <DashboardPage
+              profile={bundle.profile}
+              analysis={analysis}
+              transactions={bundle.transactions}
+              goals={bundle.goals}
+              onNavigate={(nextPage) => {
+                if (nextPage === 'planning') setPlanningTab('forecast');
+                setPage(nextPage);
+              }}
+              onCheckGoals={() => {
+                setPlanningTab('goals');
+                setPage('planning');
+              }}
+              onAddTransaction={handleAddTransaction}
+            />
+          )}
+
+          {page === 'transactions' && (
+            <TransactionsPage
+              profile={bundle.profile}
+              transactions={bundle.transactions}
+              documents={bundle.documents}
+              onParsePdf={handleParsePdf}
+              onConfirmImport={handleConfirmImport}
+              onUpdateCategory={handleUpdateCategory}
+              onDeleteTransaction={handleDeleteTransaction}
+            />
+          )}
+
+          {page === 'reports' && analysis && (
+            <ReportsPage profile={bundle.profile} analysis={analysis} />
+          )}
+
+          {page === 'planning' && analysis && (
+            <PlanningPage
+              profile={bundle.profile}
+              analysis={analysis}
+              debts={bundle.debts}
+              goals={bundle.goals}
+              initialTab={planningTab}
+              onAddDebt={handleAddDebt}
+              onDeleteDebt={handleDeleteDebt}
+              onAddGoal={handleAddGoal}
+              onDeleteGoal={handleDeleteGoal}
+            />
+          )}
+
+          {page === 'settings' && (
+            <SettingsPage
+              profile={bundle.profile}
+              onUpdateProfile={handleUpdateProfile}
+              onExportJson={handleExportJson}
+              onResetDemo={handleResetDemo}
+              onDeleteProfile={handleDeleteProfile}
+              onLogout={handleLogout}
+            />
+          )}
+        </AppShell>
       )}
-    </AppShell>
+    </ThreeSceneProvider>
   );
 }
