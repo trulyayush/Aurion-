@@ -1,0 +1,6 @@
+{
+  "name": "AURION",
+  "description": "AI-powered 3D personal finance assistant featuring an interactive white lion companion, transaction analysis, financial health reports, and planning tools.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
